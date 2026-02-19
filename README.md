@@ -50,6 +50,6 @@ result = extract_with_bda("bucket", "document.pdf")
 - Temperature 0 for consistent extraction
 
 ### Structured Outputs for Classification
-- Use `toolConfig` with `toolChoice` to guarantee valid responses
+- Use `outputConfig.textFormat` with JSON schema to guarantee valid responses
 - Enum constraints prevent hallucinated categories
 - No string parsing needed
