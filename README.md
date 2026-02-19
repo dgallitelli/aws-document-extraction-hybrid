@@ -33,6 +33,7 @@ result = extract_with_bda("bucket", "document.pdf")
 
 - `extract_claude.py` - Claude 4.5 extraction via Converse API
 - `extract_bda.py` - Bedrock Data Automation (async API)
+- `classify_document.py` - Document classification with Structured Outputs
 - `requirements.txt` - Dependencies
 
 ## Key Implementation Notes
@@ -47,3 +48,8 @@ result = extract_with_bda("bucket", "document.pdf")
 - Pass document bytes directly (cannot read S3 via text prompt)
 - Use cross-region inference profile IDs (`us.anthropic.claude-*`)
 - Temperature 0 for consistent extraction
+
+### Structured Outputs for Classification
+- Use `toolConfig` with `toolChoice` to guarantee valid responses
+- Enum constraints prevent hallucinated categories
+- No string parsing needed
