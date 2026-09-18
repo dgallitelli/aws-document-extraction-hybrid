@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aws-idp-starter"
+version = "0.1.0"
+description = "Policy-driven AWS intelligent document processing starter"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "boto3>=1.42.0,<2",
+  "Pillow>=10,<13",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<10",
+]
+
+[project.scripts]
+idp-process = "process_document:main"
+
+[tool.setuptools]
+py-modules = [
+  "classify_document",
+  "extract_bda",
+  "extract_claude",
+  "process_document",
+]
+
+[tool.setuptools.packages.find]
+include = ["idp_starter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

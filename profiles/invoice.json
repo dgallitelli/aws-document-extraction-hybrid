@@ -1,0 +1,93 @@
+{
+  "name": "invoice",
+  "version": "1.0",
+  "deadline_seconds": 120,
+  "fallback_on_low_confidence": true,
+  "fields": {
+    "invoice_number": {
+      "description": "The supplier-assigned invoice identifier",
+      "required": true,
+      "aliases": ["INVOICE_RECEIPT_ID", "INVOICE_NUMBER"],
+      "query": "What is the invoice number?",
+      "require_confidence": true,
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "invoice_date": {
+      "description": "Invoice issue date in ISO 8601 format YYYY-MM-DD",
+      "required": true,
+      "aliases": ["INVOICE_RECEIPT_DATE", "INVOICE_DATE"],
+      "query": "What is the invoice issue date? Return YYYY-MM-DD.",
+      "require_confidence": true,
+      "value_type": "date",
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "due_date": {
+      "description": "Payment due date in ISO 8601 format YYYY-MM-DD",
+      "aliases": ["DUE_DATE"],
+      "query": "What is the payment due date? Return YYYY-MM-DD.",
+      "value_type": "date",
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "supplier_name": {
+      "description": "Legal name of the supplier or issuer",
+      "required": true,
+      "aliases": ["VENDOR_NAME", "SUPPLIER_NAME"],
+      "query": "What is the legal name of the supplier or issuer?",
+      "require_confidence": true,
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "customer_name": {
+      "description": "Legal name of the billed customer",
+      "aliases": ["RECEIVER_NAME", "CUSTOMER_NAME"],
+      "query": "What is the legal name of the billed customer?",
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "total_amount": {
+      "description": "Final amount due as a decimal number without a currency symbol",
+      "required": true,
+      "aliases": ["TOTAL", "AMOUNT_DUE"],
+      "query": "What is the final total amount due? Return only the decimal number.",
+      "require_confidence": true,
+      "value_type": "number",
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    },
+    "currency": {
+      "description": "ISO 4217 currency code",
+      "aliases": ["CURRENCY"],
+      "query": "What is the ISO 4217 currency code?",
+      "pattern": "^[A-Z]{3}$",
+      "confidence_thresholds": {
+        "textract-expense": 0.8
+      }
+    }
+  },
+  "providers": [
+    {
+      "name": "textract-expense",
+      "type": "textract",
+      "mode": "expense"
+    },
+    {
+      "name": "bedrock-fallback",
+      "type": "bedrock",
+      "model_id": "${BEDROCK_MODEL_ID}",
+      "max_tokens": 1200,
+      "max_document_bytes": 4500000,
+      "max_image_bytes": 3750000,
+      "max_image_dimension": 8000,
+      "require_review": true
+    }
+  ]
+}

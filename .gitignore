@@ -1,0 +1,12 @@
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+infra/cdk.out/
+infra/dist/
+infra/node_modules/
+live-validation-report.json

@@ -1,133 +1,161 @@
-"""
-Hybrid document processing with intelligent routing.
+"""Compatibility entry point for the profile-driven IDP pipeline."""
 
-Routes standardized documents to Textract, variable documents to BDA.
-"""
-import boto3
-from classify_document import classify
-from extract_bda import extract_with_bda
+from __future__ import annotations
 
+import argparse
+import json
+import os
+from typing import Any
 
-# Routing map for standardized document types
+from idp_starter import load_profile, process_s3_document
+from idp_starter.providers.bda import BdaProvider
+from idp_starter.providers.textract import TextractProvider
+
+# Retained for callers that imported the original constant. New routing belongs
+# in versioned profiles.
 TEXTRACT_ROUTES = {
     "invoice": "expense",
     "receipt": "expense",
     "drivers_license": "id",
     "passport": "id",
-    "w2": "forms",
-    "tax_form": "forms",
+    "w2": "queries",
+    "tax_form": "queries",
 }
 
 
-def process_document(bucket: str, key: str, region: str = "us-east-1") -> dict:
-    """
-    Process document with intelligent routing.
-
-    Classifies the document, then routes to optimal service:
-    - Standardized forms → Textract (cheaper, deterministic)
-    - Variable documents → BDA (handles layout variability)
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-        region: AWS region
-
-    Returns:
-        Normalized extraction result
-    """
-    textract = boto3.client("textract", region_name=region)
-
-    # Classify document
-    classification = classify(bucket, key, region)
-    doc_type = classification["doc_type"]
-    layout = classification["layout"]
-
-    # Route standardized documents to Textract
-    if layout == "standard" and doc_type in TEXTRACT_ROUTES:
-        route = TEXTRACT_ROUTES[doc_type]
-
-        if route == "expense":
-            response = textract.analyze_expense(
-                Document={"S3Object": {"Bucket": bucket, "Name": key}}
-            )
-            return normalize_textract(response)
-
-        elif route == "id":
-            response = textract.analyze_id(
-                DocumentPages=[{"S3Object": {"Bucket": bucket, "Name": key}}]
-            )
-            return normalize_textract(response)
-
-        elif route == "forms":
-            response = textract.analyze_document(
-                Document={"S3Object": {"Bucket": bucket, "Name": key}},
-                FeatureTypes=["FORMS", "TABLES"]
-            )
-            return normalize_textract(response)
-
-    # Variable documents go to BDA
-    response = extract_with_bda(bucket, key, region)
-    return normalize_bda(response)
+def _profile_path(value: str | None) -> str:
+    path = value or os.environ.get("IDP_PROFILE")
+    if not path:
+        raise ValueError("Pass profile_path or set IDP_PROFILE")
+    return path
 
 
-def process_with_fallback(bucket: str, key: str, region: str = "us-east-1") -> dict:
-    """
-    Process document with automatic fallback to BDA on errors.
-    """
-    try:
-        classification = classify(bucket, key, region)
+def process_document(
+    bucket: str,
+    key: str,
+    region: str | None = None,
+    profile_path: str | None = None,
+    aws_profile: str | None = None,
+    request_id: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Process one S3 document and return the canonical result envelope."""
 
-        if classification["layout"] == "standard":
-            result = process_document(bucket, key, region)
-            # Fall back to BDA for low-confidence results
-            if result.get("confidence", 1.0) < 0.7:
-                return normalize_bda(extract_with_bda(bucket, key, region))
-            return result
-
-        return normalize_bda(extract_with_bda(bucket, key, region))
-
-    except Exception:
-        # BDA as universal fallback
-        return normalize_bda(extract_with_bda(bucket, key, region))
-
-
-def normalize_textract(response: dict) -> dict:
-    """Convert Textract response to unified format."""
-    fields = {}
-    tables = []
-    raw_text_lines = []
-
-    for block in response.get("Blocks", []):
-        if block["BlockType"] == "KEY_VALUE_SET":
-            # Extract form fields (simplified)
-            pass
-        elif block["BlockType"] == "TABLE":
-            tables.append(block)
-        elif block["BlockType"] == "LINE":
-            raw_text_lines.append(block.get("Text", ""))
-
-    return {
-        "source": "textract",
-        "fields": fields,
-        "tables": tables,
-        "raw_text": "\n".join(raw_text_lines)
-    }
+    return process_s3_document(
+        bucket=bucket,
+        key=key,
+        profile_path=_profile_path(profile_path),
+        aws_profile=aws_profile,
+        region=region,
+        request_id=request_id,
+    ).to_dict(include_raw=include_raw)
 
 
-def normalize_bda(response: dict) -> dict:
-    """Convert BDA response to unified format."""
-    return {
-        "source": "bda",
-        "fields": {},
-        "tables": [],
-        "raw_text": response.get("markdown", ""),
-        "elements_count": response.get("elements_count", 0),
-        "table_count": response.get("table_count", 0)
-    }
+def process_with_fallback(
+    bucket: str,
+    key: str,
+    region: str | None = None,
+    profile_path: str | None = None,
+    aws_profile: str | None = None,
+    request_id: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Legacy alias; fallback behavior is now part of the profile."""
+
+    return process_document(
+        bucket=bucket,
+        key=key,
+        region=region,
+        profile_path=profile_path,
+        aws_profile=aws_profile,
+        request_id=request_id,
+        include_raw=include_raw,
+    )
+
+
+def normalize_textract(
+    response: dict[str, Any],
+    profile_path: str | None = None,
+    mode: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Normalize a captured Textract response for compatibility and testing."""
+
+    profile = load_profile(_profile_path(profile_path))
+    inferred_mode = mode
+    if inferred_mode is None:
+        if "ExpenseDocuments" in response:
+            inferred_mode = "expense"
+        elif "IdentityDocuments" in response:
+            inferred_mode = "id"
+        else:
+            inferred_mode = "queries"
+    provider = TextractProvider(
+        "textract",
+        client=None,
+        options={"mode": inferred_mode},
+    )
+    return provider.normalize_response(response, profile).to_dict(
+        include_raw=include_raw
+    )
+
+
+def normalize_bda(
+    response: dict[str, Any],
+    profile_path: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    """Normalize a captured BDA payload for compatibility and testing."""
+
+    profile = load_profile(_profile_path(profile_path))
+    provider = BdaProvider(
+        "bda",
+        client=None,
+        s3_client=None,
+        options={
+            "mode": "sync",
+            "data_automation_profile_arn": "compatibility",
+            "blueprints": [{"blueprintArn": "compatibility"}],
+        },
+    )
+    if "outputSegments" in response:
+        result = provider.normalize_response(response, profile)
+    else:
+        result = provider.normalize_payload(response, profile)
+    return result.to_dict(include_raw=include_raw)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bucket")
+    parser.add_argument("key")
+    parser.add_argument("--profile", required=True, dest="profile_path")
+    parser.add_argument("--aws-profile")
+    parser.add_argument("--region")
+    parser.add_argument("--request-id")
+    parser.add_argument(
+        "--include-raw",
+        action="store_true",
+        help="Include raw text, tables, and provider metadata in stdout",
+    )
+    args = parser.parse_args()
+    result = process_document(
+        bucket=args.bucket,
+        key=args.key,
+        profile_path=args.profile_path,
+        aws_profile=args.aws_profile,
+        region=args.region,
+        request_id=args.request_id,
+        include_raw=args.include_raw,
+    )
+    print(
+        json.dumps(
+            result,
+            indent=2,
+            default=str,
+        )
+    )
 
 
 if __name__ == "__main__":
-    # Example usage
-    result = process_document(bucket="my-bucket", key="document.pdf")
-    print(f"Source: {result['source']}")
-    print(f"Raw text preview: {result['raw_text'][:200]}...")
+    main()

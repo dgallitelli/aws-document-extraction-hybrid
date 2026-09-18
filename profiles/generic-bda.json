@@ -1,0 +1,64 @@
+{
+  "name": "generic-business-document",
+  "version": "1.0",
+  "deadline_seconds": 600,
+  "fallback_on_low_confidence": true,
+  "fields": {
+    "document_id": {
+      "description": "Primary identifier printed on the document",
+      "required": true,
+      "aliases": ["document_number", "reference_number"],
+      "require_confidence": true,
+      "confidence_thresholds": {
+        "bda-primary": 0.7
+      }
+    },
+    "effective_date": {
+      "description": "Primary effective or issue date in ISO 8601 format YYYY-MM-DD",
+      "aliases": ["issue_date", "document_date"],
+      "value_type": "date",
+      "confidence_thresholds": {
+        "bda-primary": 0.7
+      }
+    },
+    "party_name": {
+      "description": "Primary organization or person named in the document",
+      "required": true,
+      "aliases": ["customer_name", "account_name"],
+      "require_confidence": true,
+      "confidence_thresholds": {
+        "bda-primary": 0.7
+      }
+    },
+    "total_amount": {
+      "description": "Primary monetary total without a currency symbol",
+      "aliases": ["amount_due", "grand_total"],
+      "value_type": "number",
+      "confidence_thresholds": {
+        "bda-primary": 0.7
+      }
+    }
+  },
+  "providers": [
+    {
+      "name": "bda-primary",
+      "type": "bda",
+      "mode": "async",
+      "data_automation_profile_arn": "${BDA_PROFILE_ARN}",
+      "data_automation_project_arn": "${BDA_PROJECT_ARN}",
+      "output_s3_uri": "${BDA_OUTPUT_S3_URI}",
+      "timeout_seconds": 300,
+      "cleanup_output": true
+    },
+    {
+      "name": "bedrock-fallback",
+      "type": "bedrock",
+      "model_id": "${BEDROCK_MODEL_ID}",
+      "max_tokens": 1200,
+      "max_document_bytes": 4500000,
+      "max_image_bytes": 3750000,
+      "max_image_dimension": 8000,
+      "require_review": true
+    }
+  ]
+}

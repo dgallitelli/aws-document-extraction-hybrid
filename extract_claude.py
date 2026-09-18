@@ -1,75 +1,71 @@
-"""
-Extract structured data from documents using Claude 4.5 via Bedrock Converse API.
-"""
-import boto3
-import json
+"""Compatibility wrapper for a Bedrock provider configured in an IDP profile."""
 
-# Claude 4.5 models (cross-region inference profiles)
-MODELS = {
-    "haiku": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "sonnet": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "opus": "us.anthropic.claude-opus-4-5-20251101-v1:0",
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+import boto3
+
+from idp_starter import DocumentSource, load_profile, validate_runtime_policy
+from idp_starter.config import ProviderConfig
+from idp_starter.providers import AwsProviderFactory
+
+# Aliases are configured through environment variables to avoid stale model IDs.
+MODEL_ALIASES = {
+    "haiku": "BEDROCK_HAIKU_MODEL_ID",
+    "sonnet": "BEDROCK_SONNET_MODEL_ID",
+    "opus": "BEDROCK_OPUS_MODEL_ID",
 }
 
 
 def extract_document(
     bucket: str,
     key: str,
-    prompt: str = None,
-    model: str = "haiku",
-    region: str = "us-east-1"
-) -> dict:
-    """
-    Extract structured data from a PDF using Claude 4.5.
-
-    Args:
-        bucket: S3 bucket name
-        key: S3 object key
-        prompt: Extraction prompt (default: generic structured extraction)
-        model: Claude model - haiku (fast/cheap), sonnet (balanced), opus (accurate)
-        region: AWS region
-
-    Returns:
-        Extracted data as dictionary
-    """
-    s3 = boto3.client("s3", region_name=region)
-    bedrock = boto3.client("bedrock-runtime", region_name=region)
-
-    # Download PDF from S3
-    obj = s3.get_object(Bucket=bucket, Key=key)
-    pdf_bytes = obj["Body"].read()
-
-    if prompt is None:
-        prompt = """Extract all data from this document as structured JSON.
-Include all text, tables, and form fields. Return ONLY valid JSON."""
-
-    # Call Claude via Converse API
-    response = bedrock.converse(
-        modelId=MODELS.get(model, MODELS["haiku"]),
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "document": {
-                        "format": "pdf",
-                        "name": "document",
-                        "source": {"bytes": pdf_bytes}
-                    }
-                },
-                {"text": prompt}
-            ]
-        }],
-        inferenceConfig={"maxTokens": 4096, "temperature": 0}
+    prompt: str | None = None,
+    model: str | None = None,
+    region: str | None = None,
+    profile_path: str | Path | None = None,
+    aws_profile: str | None = None,
+    include_raw: bool = False,
+) -> dict[str, Any]:
+    path = profile_path or os.environ.get("IDP_PROFILE")
+    if not path:
+        raise ValueError("Pass profile_path or set IDP_PROFILE")
+    profile = load_profile(path)
+    provider_config = next(
+        (provider for provider in profile.providers if provider.type == "bedrock"),
+        None,
     )
+    if provider_config is None:
+        raise ValueError("Profile has no Bedrock provider")
 
-    output_text = response["output"]["message"]["content"][0]["text"]
-
-    try:
-        json_str = output_text.strip()
-        if json_str.startswith("```"):
-            json_str = json_str.split("```")[1]
-            if json_str.startswith("json"):
-                json_str = json_str[4:]
-        return json.loads(json_str)
-    except json.JSONDecodeError:
-        return {"raw_text": output_text}
+    model_id = model
+    if model in MODEL_ALIASES:
+        variable = MODEL_ALIASES[model]
+        model_id = os.environ.get(variable)
+        if not model_id:
+            raise ValueError(f"Set {variable} to use the {model!r} alias")
+    options = dict(provider_config.options)
+    if model_id:
+        options["model_id"] = model_id
+    if prompt:
+        options["instruction"] = prompt
+    provider_config = ProviderConfig(
+        name=provider_config.name,
+        type=provider_config.type,
+        options=options,
+    )
+    session = boto3.Session(profile_name=aws_profile, region_name=region)
+    validate_runtime_policy(
+        profile,
+        bucket,
+        key,
+        region or session.region_name,
+    )
+    provider = AwsProviderFactory(session, region=region)(provider_config)
+    return provider.extract(
+        DocumentSource(bucket, key),
+        profile,
+    ).to_dict(include_raw=include_raw)
